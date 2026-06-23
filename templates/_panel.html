@@ -1,0 +1,285 @@
+{# Side panel: view or edit a single node.
+
+   For agent-kind nodes with structured meta_json, we render modular sections
+   (Model, System Prompt, Tools, Output Schema, Notes) and offer per-section
+   editing.  For artifacts (or agents without meta), we fall back to a single
+   body_md textarea -- same as before.
+#}
+
+<div class="panel-backdrop" onclick="closePanel()"></div>
+
+<aside class="panel open" role="dialog" aria-label="Node detail">
+  <header class="flex items-center gap-3">
+    <span class="accent-dot" style="background: {{ node['color'] or '#a78bfa' }};
+                                    width: .8rem; height: .8rem;"></span>
+    <div class="grow min-w-0">
+      <div class="font-bold text-base text-white truncate">{{ node['name'] }}</div>
+      <div class="text-[11px] uppercase tracking-wide text-gray-500">
+        {{ node['kind'] }} - key: <span class="font-mono">{{ node['key'] }}</span>
+      </div>
+    </div>
+
+    {% if mode == 'view' %}
+    <button class="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-white"
+            hx-get="/node/{{ node['id'] }}/edit"
+            hx-target="#panel-slot" hx-swap="innerHTML">
+      Edit
+    </button>
+    {% endif %}
+
+    <button class="text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300"
+            onclick="closePanel()" title="Close (Esc)">
+      Close
+    </button>
+  </header>
+
+  <div class="body">
+
+  {# ============================================================
+     VIEW MODE
+     ============================================================ #}
+  {% if mode == 'view' %}
+    {% if node['brief'] %}
+    <div class="text-sm text-gray-400 italic mb-4 border-l-2 border-gray-700 pl-3">
+      {{ node['brief'] }}
+    </div>
+    {% endif %}
+
+    {% if meta %}
+    {# Structured agent view: separate sections per field #}
+
+    {% if meta.get('model') %}
+    <section class="mb-4">
+      <h3 class="meta-h">Model</h3>
+      <div class="meta-pill">{{ meta['model'] }}</div>
+    </section>
+    {% endif %}
+
+    {% if meta.get('system_prompt') %}
+    <section class="mb-4">
+      <h3 class="meta-h">System Prompt</h3>
+      <pre class="meta-code">{{ meta['system_prompt'] }}</pre>
+    </section>
+    {% endif %}
+
+    {% if meta.get('tools') %}
+    <section class="mb-4">
+      <h3 class="meta-h">Tools ({{ meta['tools']|length }})</h3>
+      <table class="meta-table">
+        <thead><tr><th>Name</th><th>Purpose</th></tr></thead>
+        <tbody>
+          {% for t in meta['tools'] %}
+          <tr>
+            <td class="font-mono text-yellow-300">{{ t['name'] }}</td>
+            <td class="text-gray-300">{{ t.get('purpose', '') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+    {% endif %}
+
+    {% if meta.get('output_schema') %}
+    <section class="mb-4">
+      <h3 class="meta-h">Output Schema</h3>
+      <pre class="meta-code language-json">{{ meta['output_schema'] }}</pre>
+    </section>
+    {% endif %}
+
+    {% if meta.get('notes_md') %}
+    <section class="mb-4">
+      <h3 class="meta-h">Notes</h3>
+      {# Use textarea-as-data-source so HTML entities decode properly #}
+      <textarea class="md-source" hidden>{{ meta['notes_md'] }}</textarea>
+      <div class="md"></div>
+    </section>
+    {% endif %}
+
+    {% if node['body_md'] %}
+    <section class="mb-4">
+      <h3 class="meta-h">Additional Notes</h3>
+      <textarea class="md-source" hidden>{{ node['body_md'] }}</textarea>
+      <div class="md"></div>
+    </section>
+    {% endif %}
+
+    {% else %}
+    {# Artifact / unstructured fallback #}
+    {% if node['body_md'] %}
+    <textarea class="md-source" hidden>{{ node['body_md'] }}</textarea>
+    <div class="md"></div>
+    {% else %}
+    <div class="text-gray-500 text-sm italic">
+      No body content yet.  Click <b>Edit</b> to add notes.
+    </div>
+    {% endif %}
+    {% endif %}
+
+    <div class="mt-6 pt-3 border-t border-gray-800 text-xs text-gray-500">
+      Updated: {{ node['updated_at'] }}
+    </div>
+
+  {# ============================================================
+     EDIT MODE
+     ============================================================ #}
+  {% elif mode == 'edit' %}
+    <form hx-post="/node/{{ node['id'] }}"
+          hx-target="#panel-slot" hx-swap="innerHTML"
+          class="grid gap-3">
+
+      <label class="grid gap-1">
+        <span class="text-xs text-gray-400">Name</span>
+        <input name="name" required value="{{ node['name'] }}"
+               class="bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm">
+      </label>
+
+      <label class="grid gap-1">
+        <span class="text-xs text-gray-400">Brief (one-line tooltip)</span>
+        <input name="brief" value="{{ node['brief'] or '' }}"
+               class="bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm">
+      </label>
+
+      {% if meta is not none %}
+      {# Structured editor: each meta field gets its own input #}
+
+      <label class="grid gap-1">
+        <span class="text-xs text-gray-400">Model</span>
+        <input name="meta_model" value="{{ meta.get('model', '') }}"
+               placeholder="e.g. claude-sonnet-4.5, gpt-4o, llama-3.1-70b"
+               class="bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm font-mono">
+      </label>
+
+      <label class="grid gap-1">
+        <span class="text-xs text-gray-400">System Prompt</span>
+        <textarea name="meta_system_prompt" rows="10"
+                  class="bg-gray-900 border border-gray-600 rounded px-2 py-1.5
+                         text-sm font-mono leading-snug resize-y"
+                  >{{ meta.get('system_prompt', '') }}</textarea>
+      </label>
+
+      <div class="grid gap-1">
+        <span class="text-xs text-gray-400">
+          Tools (one per line, format: <span class="font-mono">name | purpose</span>)
+        </span>
+        <textarea name="meta_tools" rows="8"
+                  class="bg-gray-900 border border-gray-600 rounded px-2 py-1.5
+                         text-sm font-mono leading-snug resize-y"
+                  placeholder="Tool_A | what it does&#10;Tool_B | what it does"
+                  >{%- for t in meta.get('tools', []) -%}
+{{ t.get('name','') }} | {{ t.get('purpose','') }}
+{% endfor -%}</textarea>
+      </div>
+
+      <label class="grid gap-1">
+        <span class="text-xs text-gray-400">Output Schema (raw text -- JSON, YAML, anything)</span>
+        <textarea name="meta_output_schema" rows="10"
+                  class="bg-gray-900 border border-gray-600 rounded px-2 py-1.5
+                         text-sm font-mono leading-snug resize-y"
+                  >{{ meta.get('output_schema', '') }}</textarea>
+      </label>
+
+      <label class="grid gap-1">
+        <span class="text-xs text-gray-400">Notes (Markdown)</span>
+        <textarea name="meta_notes_md" rows="6"
+                  class="bg-gray-900 border border-gray-600 rounded px-2 py-1.5
+                         text-sm font-mono leading-snug resize-y"
+                  >{{ meta.get('notes_md', '') }}</textarea>
+      </label>
+
+      <label class="grid gap-1">
+        <span class="text-xs text-gray-400">Additional body markdown (optional)</span>
+        <textarea name="body_md" rows="4"
+                  class="bg-gray-900 border border-gray-600 rounded px-2 py-1.5
+                         text-sm font-mono leading-snug resize-y"
+                  >{{ node['body_md'] or '' }}</textarea>
+      </label>
+
+      {% else %}
+      {# Unstructured editor (artifacts): single body_md textarea #}
+      <label class="grid gap-1">
+        <span class="text-xs text-gray-400">
+          Body (Markdown -- schema, description, etc)
+        </span>
+        <textarea name="body_md" rows="22"
+                  class="bg-gray-900 border border-gray-600 rounded px-2 py-1.5
+                         text-sm font-mono leading-snug resize-y"
+                  style="min-height: 22rem;"
+                  >{{ node['body_md'] or '' }}</textarea>
+      </label>
+      {% endif %}
+
+      <div class="flex items-center gap-2 mt-1">
+        <button type="submit"
+                class="wm-yellow font-bold px-4 py-1.5 rounded text-sm">
+          Save
+        </button>
+        <button type="button"
+                class="text-xs px-3 py-1.5 rounded bg-gray-700 hover:bg-gray-600 text-white"
+                hx-get="/node/{{ node['id'] }}/panel"
+                hx-target="#panel-slot" hx-swap="innerHTML">
+          Cancel
+        </button>
+        <span class="grow"></span>
+        <span class="text-xs text-gray-500">Esc closes the panel</span>
+      </div>
+    </form>
+  {% endif %}
+  </div>
+</aside>
+
+<style>
+  /* Meta-section visual language */
+  .meta-h {
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #94a3b8;
+    margin: 0 0 .35rem 0;
+    border-bottom: 1px solid #1f2937;
+    padding-bottom: .15rem;
+  }
+  .meta-pill {
+    display: inline-block;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: .82rem;
+    background: #1f2937;
+    color: #fcd34d;
+    padding: .25rem .6rem;
+    border-radius: .25rem;
+    border: 1px solid #374151;
+  }
+  .meta-code {
+    background: #0f172a;
+    border: 1px solid #1f2937;
+    border-radius: .4rem;
+    padding: .75rem;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: .78rem;
+    color: #e5e7eb;
+    white-space: pre;
+    overflow-x: auto;
+    margin: 0;
+    line-height: 1.5;
+  }
+  .meta-code.language-json { color: #d1d5db; }
+  .meta-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .82rem;
+  }
+  .meta-table th, .meta-table td {
+    border: 1px solid #1f2937;
+    padding: .35rem .55rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  .meta-table th {
+    background: #0f172a;
+    font-weight: 600;
+    color: #cbd5e1;
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  .meta-table td.font-mono { color: #fcd34d; }
+</style>

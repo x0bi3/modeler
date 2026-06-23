@@ -1,0 +1,53 @@
+{# Phases view: vertical timeline of phase cards with steps inside #}
+
+<div class="max-w-5xl mx-auto">
+  <ol class="space-y-6">
+    {% for p in phases %}
+    <li class="relative">
+      {# Phase header card #}
+      <div class="node kind-phase mb-3"
+           style="--accent: {{ p['color'] or '#a78bfa' }};"
+           hx-get="/node/{{ p['id'] }}/panel"
+           hx-target="#panel-slot"
+           hx-swap="innerHTML"
+           data-node-id="{{ p['id'] }}">
+        <div class="flex items-center gap-2">
+          <span class="accent-dot" style="background: {{ p['color'] or '#a78bfa' }};"></span>
+          <span class="font-bold text-base">{{ p['name'] }}</span>
+        </div>
+        {% if p['brief'] %}
+        <div class="text-sm text-gray-400 mt-1">{{ p['brief'] }}</div>
+        {% endif %}
+        <div class="node-preview">click for phase overview</div>
+      </div>
+
+      {# Steps as a numbered swimlane #}
+      <ol class="ml-6 border-l-2 pl-4 space-y-2"
+          style="border-color: {{ p['color'] or '#a78bfa' }}66;">
+        {% for s in p['steps'] %}
+        <li class="bg-gray-900 border border-gray-800 rounded p-2.5 hover:border-gray-600 transition">
+          <div class="flex items-baseline gap-2">
+            <span class="text-xs font-mono text-gray-500">{{ "%02d"|format(s['order_idx']) }}</span>
+            <span class="font-semibold text-sm text-gray-100 grow">{{ s['action'] }}</span>
+            {% if s['actor_name'] %}
+            <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded"
+                  style="background: {{ s['actor_color'] or '#374151' }}33;
+                         color: {{ s['actor_color'] or '#9ca3af' }};
+                         border: 1px solid {{ s['actor_color'] or '#374151' }}66;">
+              {{ s['actor_name'] }}
+            </span>
+            {% endif %}
+          </div>
+          {% if s['detail_md'] %}
+          <div class="ml-7 mt-1.5">
+            <script type="text/plain" class="md-source">{{ s['detail_md'] }}</script>
+            <div class="md text-xs"></div>
+          </div>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+    </li>
+    {% endfor %}
+  </ol>
+</div>

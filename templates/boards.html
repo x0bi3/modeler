@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}AIO Modeler — Boards{% endblock %}
+
+{% block body %}
+<div class="max-w-3xl mx-auto">
+  <h1 class="text-2xl font-bold mb-1">Boards</h1>
+  <p class="text-gray-400 text-sm mb-6">
+    Each board models one agent system.  Click to explore, or create a fresh one below.
+  </p>
+
+  {% if boards %}
+  <ul class="space-y-2 mb-8">
+    {% for b in boards %}
+    <li>
+      <a href="/b/{{ b['slug'] }}"
+         class="block p-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded transition">
+        <div class="flex items-center gap-2">
+          <span class="text-lg font-semibold text-white">{{ b['name'] }}</span>
+          <span class="text-xs text-gray-500 font-mono">/{{ b['slug'] }}</span>
+        </div>
+        {% if b['description'] %}
+        <div class="text-sm text-gray-400 mt-1">{{ b['description'] }}</div>
+        {% endif %}
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="bg-gray-800 border border-gray-700 rounded p-4 text-gray-400 mb-8">
+    No boards yet — create one below.
+  </div>
+  {% endif %}
+
+  <details class="bg-gray-900 border border-gray-700 rounded p-4">
+    <summary class="cursor-pointer font-semibold text-gray-300">+ New board</summary>
+    <form method="post" action="/boards/new" class="mt-3 grid gap-3">
+      <label class="grid gap-1">
+        <span class="text-xs text-gray-400">Slug (URL-safe)</span>
+        <input name="slug" required pattern="[a-z0-9][a-z0-9-]*"
+               class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm font-mono">
+      </label>
+      <label class="grid gap-1">
+        <span class="text-xs text-gray-400">Name</span>
+        <input name="name" required
+               class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm">
+      </label>
+      <label class="grid gap-1">
+        <span class="text-xs text-gray-400">Description (optional)</span>
+        <input name="description"
+               class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm">
+      </label>
+      <button class="wm-yellow font-bold px-3 py-1.5 rounded justify-self-start">
+        Create board
+      </button>
+    </form>
+  </details>
+</div>
+{% endblock %}

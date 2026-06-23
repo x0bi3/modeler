@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ board['name'] }} — AIO Modeler{% endblock %}
+
+{% block header_right %}
+  <div class="flex items-center gap-2">
+    <a href="/b/{{ board['slug'] }}"
+       class="px-3 py-1 rounded text-sm font-semibold
+              {% if view == 'arch' %}wm-yellow{% else %}bg-blue-800 text-white hover:bg-blue-700{% endif %}">
+      Architecture
+    </a>
+    <a href="/b/{{ board['slug'] }}/phases"
+       class="px-3 py-1 rounded text-sm font-semibold
+              {% if view == 'phases' %}wm-yellow{% else %}bg-blue-800 text-white hover:bg-blue-700{% endif %}">
+      Phases
+    </a>
+  </div>
+{% endblock %}
+
+{% block body %}
+<div class="mb-4">
+  <h1 class="text-xl font-bold">{{ board['name'] }}</h1>
+  {% if board['description'] %}
+  <p class="text-sm text-gray-400">{{ board['description'] }}</p>
+  {% endif %}
+</div>
+
+{% if view == 'arch' %}
+  {% include "_arch_view.html" %}
+{% elif view == 'phases' %}
+  {% include "_phases_view.html" %}
+{% endif %}
+{% endblock %}

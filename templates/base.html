@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}AIO Modeler{% endblock %}</title>
+
+<!-- Tailwind v4 browser JIT + bootstrap block (same trick as Mover) -->
+<script src="/static/tailwind.js"></script>
+<style type="text/tailwindcss">@import "tailwindcss";</style>
+
+<!-- HTMX for partials -->
+<script src="/static/htmx.min.js"></script>
+<!-- Marked.js for client-side markdown rendering -->
+<script src="/static/marked.min.js"></script>
+
+<style>
+  html, body { margin: 0; min-height: 100vh; background: #0b1220; color: #e5e7eb;
+               font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+  /* Walmart-y but darker for design-tool vibes */
+  .wm-blue   { background: #0071dc; }
+  .wm-yellow { background: #ffc220; color: #1a1a1a; }
+
+  /* Node card */
+  .node {
+    background: #1f2937;
+    border: 1px solid #374151;
+    border-radius: .5rem;
+    padding: .6rem .75rem;
+    cursor: pointer;
+    transition: transform .08s ease, box-shadow .08s ease, border-color .08s ease;
+    position: relative;
+  }
+  .node:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,.4);
+                border-color: #6b7280; }
+  .node.kind-artifact { border-style: dashed; opacity: .92; }
+  .node.kind-phase    { border-left: 4px solid var(--accent, #a78bfa); }
+
+  .node .accent-dot {
+    display: inline-block; width: .55rem; height: .55rem; border-radius: 999px;
+    margin-right: .4rem; vertical-align: middle;
+  }
+
+  /* Hover preview tooltip */
+  .node-preview {
+    position: absolute; bottom: calc(100% + 6px); left: 50%;
+    transform: translateX(-50%);
+    background: #0f172a; border: 1px solid #475569; color: #e5e7eb;
+    padding: .35rem .55rem; border-radius: .35rem;
+    font-size: .72rem; white-space: nowrap; max-width: 22rem;
+    opacity: 0; pointer-events: none; transition: opacity .12s ease;
+    z-index: 50;
+  }
+  .node:hover .node-preview { opacity: 1; }
+
+  /* Arch grid: layers stack vertically, slots span horizontally */
+  .arch-layer { display: flex; gap: 1rem; align-items: stretch; justify-content: center;
+                margin-bottom: 1.75rem; }
+  .arch-slot  { min-width: 12rem; max-width: 18rem; flex: 0 1 16rem; }
+
+  /* SVG overlay sits behind nodes, lines connect layers */
+  .arch-board { position: relative; }
+  .arch-svg   { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+  .arch-layer { position: relative; z-index: 1; }
+
+  /* Side panel */
+  .panel-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 40; }
+  .panel {
+    position: fixed; top: 0; right: 0; bottom: 0; width: min(720px, 95vw);
+    background: #111827; border-left: 1px solid #374151;
+    box-shadow: -8px 0 24px rgba(0,0,0,.5);
+    z-index: 50; display: flex; flex-direction: column;
+    transform: translateX(100%); transition: transform .18s ease;
+  }
+  .panel.open { transform: translateX(0); }
+  .panel header { padding: .9rem 1rem; border-bottom: 1px solid #374151;
+                  display: flex; align-items: center; gap: .75rem; }
+  .panel .body  { padding: 1rem; overflow-y: auto; flex: 1; }
+
+  /* Rendered markdown */
+  .md h1 { font-size: 1.35rem; font-weight: 700; margin: .5rem 0 .6rem; color: #f3f4f6; }
+  .md h2 { font-size: 1.1rem;  font-weight: 700; margin: 1rem 0 .4rem; color: #e5e7eb; }
+  .md h3 { font-size: .98rem;  font-weight: 600; margin: .8rem 0 .3rem; color: #d1d5db; }
+  .md p, .md li { font-size: .88rem; line-height: 1.55; color: #d1d5db; }
+  .md ul, .md ol { margin-left: 1.2rem; margin-bottom: .6rem; }
+  .md li { margin-bottom: .2rem; }
+  .md code { background: #1f2937; padding: .1rem .3rem; border-radius: .25rem;
+             font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+             font-size: .82rem; color: #fcd34d; }
+  .md pre  { background: #0f172a; padding: .75rem; border-radius: .4rem;
+             overflow-x: auto; margin: .5rem 0; border: 1px solid #1f2937; }
+  .md pre code { background: transparent; color: #e5e7eb; padding: 0; font-size: .78rem; }
+  .md table { border-collapse: collapse; margin: .5rem 0; font-size: .82rem; }
+  .md th, .md td { border: 1px solid #374151; padding: .35rem .55rem; }
+  .md th { background: #1f2937; font-weight: 600; color: #f3f4f6; }
+  .md blockquote { border-left: 3px solid #6366f1; padding-left: .8rem;
+                   color: #cbd5e1; margin: .6rem 0; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<header class="wm-blue px-4 py-2 flex items-center gap-3 shadow-md">
+  <a href="/" class="font-bold text-white text-lg hover:underline">AIO Modeler</a>
+  <span class="text-blue-100 text-xs">design tool for agent orchestration</span>
+  <span class="grow"></span>
+  {% block header_right %}{% endblock %}
+</header>
+
+<main class="px-4 py-4">
+  {% block body %}{% endblock %}
+</main>
+
+<!-- Panel slot — HTMX swaps content into #panel-slot -->
+<div id="panel-slot"></div>
+
+<script>
+  // ---- Markdown rendering ----
+  // We embed raw markdown inside a hidden <textarea class="md-source"> instead
+  // of a <script type="text/plain"> because textarea.value automatically
+  // decodes HTML entities (`&#34;` -> `"`).  Script-tag content is treated as
+  // CDATA and entities stay literal -- which is why JSON blocks showed up as
+  // `&#34;...&#34;` in the old panel.
+  function renderAllMarkdown(scope) {
+    (scope || document).querySelectorAll(".md-source").forEach(el => {
+      const target = el.nextElementSibling;
+      if (target && target.classList.contains("md")) {
+        const raw = (el.tagName === "TEXTAREA") ? el.value : el.textContent;
+        target.innerHTML = marked.parse(raw || "");
+      }
+    });
+  }
+  document.addEventListener("DOMContentLoaded", () => renderAllMarkdown());
+  document.body.addEventListener("htmx:afterSwap", e => renderAllMarkdown(e.detail.target));
+
+  // ---- Panel open/close ----
+  function closePanel() {
+    const slot = document.getElementById("panel-slot");
+    slot.innerHTML = "";
+  }
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape") closePanel();
+  });
+
+  // Click outside panel closes it
+  document.addEventListener("click", e => {
+    if (e.target.classList.contains("panel-backdrop")) closePanel();
+  });
+</script>
+</body>
+</html>

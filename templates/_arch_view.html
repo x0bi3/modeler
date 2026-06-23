@@ -1,0 +1,613 @@
+{# Infinite-canvas architecture view.
+
+   Interactions:
+   - Card mousedown -> drag (>5px) or click (panel open)
+   - Empty mousedown -> pan
+   - Wheel -> pan (Shift = horizontal)
+   - Ctrl+Wheel -> zoom around cursor (Miro-style)
+   - "recenter" button -> snap viewport to content bbox
+#}
+
+<div class="canvas-wrap" id="canvas-wrap">
+  <div class="canvas" id="arch-canvas">
+    <svg class="arch-svg" id="arch-edges" xmlns="http://www.w3.org/2000/svg"
+         width="1" height="1" style="overflow: visible;"></svg>
+
+    {% for n in nodes %}
+    <div class="node-card kind-{{ n['kind'] }}"
+         data-node-id="{{ n['id'] }}"
+         style="left: {{ n['arch_x'] or 100 }}px;
+                top:  {{ n['arch_y'] or 100 }}px;
+                --accent: {{ n['color'] or '#a78bfa' }};"
+         hx-get="/node/{{ n['id'] }}/panel"
+         hx-target="#panel-slot"
+         hx-swap="innerHTML"
+         hx-trigger="card-click">
+      <div class="card-head">
+        {% if n['kind'] == 'agent' %}
+        <svg class="agent-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="8" r="4" fill="currentColor"/>
+          <path d="M4 22 Q4 14 12 14 Q20 14 20 22 Z" fill="currentColor"/>
+        </svg>
+        {% else %}
+        <span class="accent-dot" style="background: {{ n['color'] or '#a78bfa' }};"></span>
+        {% endif %}
+        <span class="card-name">{{ n['name'] }}</span>
+        <span class="card-kind">{{ n['kind'] }}</span>
+      </div>
+      {% if n['brief'] %}
+      <div class="card-brief">{{ n['brief'] }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="canvas-tools">
+    <button type="button" id="canvas-recenter" title="Re-center on content">recenter</button>
+    <button type="button" id="canvas-zoom-reset" title="Reset zoom to 100%">100%</button>
+    <span id="canvas-coords">0, 0 - 100%</span>
+  </div>
+</div>
+
+<div class="canvas-legend">
+  <span><span class="legend-line" style="background:#64748b"></span> comms</span>
+  <span><span class="legend-line" style="background:#a78bfa"></span> flow (artifact)</span>
+  <span><span class="legend-line dashed" style="border-color:#fbbf24"></span> reference</span>
+  <span class="legend-divider"></span>
+  <span><span class="legend-pill agent-pill"></span> agent</span>
+  <span><span class="legend-pill artifact-pill"></span> artifact</span>
+  <span class="legend-divider"></span>
+  <span><span class="legend-num">1</span> step number</span>
+  <span class="canvas-hint">drag card / drag canvas to pan / wheel scroll / Ctrl+wheel = zoom</span>
+</div>
+
+<style>
+  .canvas-wrap {
+    background: #0a0f1c;
+    border: 1px solid #1f2937;
+    border-radius: .5rem;
+    overflow: hidden;
+    height: calc(100vh - 200px);
+    position: relative;
+    cursor: grab;
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(255,255,255,.06) 1px, transparent 1.4px);
+    background-size: 24px 24px;
+    background-position: 0 0;
+  }
+  .canvas-wrap.panning { cursor: grabbing; user-select: none; }
+
+  .canvas {
+    position: absolute;
+    left: 0; top: 0;
+    width: 1px; height: 1px;
+    transform: translate(0px, 0px) scale(1);
+    transform-origin: 0 0;
+    will-change: transform;
+  }
+  .arch-svg {
+    position: absolute;
+    left: 0; top: 0;
+    pointer-events: none;
+    overflow: visible;
+    /* Above cards so labels never get hidden behind a card -- pointer-events
+       is none so clicks still reach the cards underneath. */
+    z-index: 5;
+  }
+
+  .canvas-tools {
+    position: absolute;
+    top: .5rem; right: .5rem;
+    display: flex; gap: .35rem; align-items: center;
+    font-size: .7rem; color: #94a3b8; z-index: 20;
+  }
+  .canvas-tools button {
+    background: #1f2937; color: #e5e7eb;
+    border: 1px solid #374151; border-radius: 4px;
+    padding: .25rem .55rem; cursor: pointer; font-size: .7rem;
+  }
+  .canvas-tools button:hover { background: #374151; }
+  #canvas-coords {
+    background: #0a0f1c; padding: .15rem .5rem;
+    border: 1px solid #1f2937; border-radius: 4px;
+    font-family: ui-monospace, monospace; font-size: .65rem;
+  }
+
+  .node-card {
+    position: absolute;
+    width: 240px;
+    background: #1f2937;
+    border: 1px solid #374151;
+    padding: .55rem .7rem;
+    cursor: grab;
+    user-select: none;
+    transition: box-shadow .08s ease, border-color .08s ease;
+    z-index: 1;
+  }
+  .node-card:hover { border-color: #6b7280;
+                     box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+  .node-card.dragging { cursor: grabbing; opacity: .85;
+                         box-shadow: 0 10px 30px rgba(0,0,0,.6);
+                         z-index: 10; }
+
+  .node-card.kind-agent {
+    border-radius: 999px 14px 14px 999px;
+    padding-left: 1.4rem;
+    border-left: 4px solid var(--accent);
+    background: linear-gradient(90deg, rgba(167,139,250,.08) 0%, #1f2937 30%);
+  }
+  .node-card.kind-artifact {
+    border-radius: 2px;
+    border-style: dashed;
+    background:
+      repeating-linear-gradient(45deg,
+        rgba(255,255,255,.015) 0 6px, transparent 6px 12px),
+      #1f2937;
+  }
+
+  .card-head { display: flex; align-items: center; gap: .4rem; }
+  .accent-dot { display: inline-block; width: .55rem; height: .55rem;
+                border-radius: 999px; flex: 0 0 auto; }
+  .agent-icon { width: 18px; height: 18px; flex: 0 0 auto;
+                color: var(--accent); filter: drop-shadow(0 0 2px rgba(0,0,0,.5)); }
+  .card-name { font-weight: 600; font-size: .85rem; color: #f3f4f6;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card-kind { margin-left: auto; font-size: .58rem; text-transform: uppercase;
+               letter-spacing: .05em; color: #6b7280; }
+  .card-brief { margin-top: .25rem; font-size: .72rem; line-height: 1.35;
+                color: #9ca3af; }
+
+  .canvas-legend {
+    display: flex; gap: 1rem; padding: .5rem .25rem; font-size: .72rem;
+    color: #94a3b8; align-items: center; flex-wrap: wrap;
+  }
+  .legend-line { display: inline-block; width: .9rem; height: 2px;
+                 vertical-align: middle; margin-right: .25rem; }
+  .legend-line.dashed { height: 0; border-top: 2px dashed; }
+  .legend-divider { width: 1px; height: 1rem; background: #1f2937; }
+  .legend-pill { display: inline-block; width: 1.2rem; height: .7rem;
+                 vertical-align: middle; margin-right: .25rem;
+                 border: 1px solid #374151; }
+  .legend-pill.agent-pill    { border-radius: 999px 4px 4px 999px;
+                               border-left: 3px solid #a78bfa; }
+  .legend-pill.artifact-pill { border-radius: 2px; border-style: dashed; }
+  .legend-num  { display: inline-flex; align-items: center; justify-content: center;
+                 width: 1.1rem; height: 1.1rem; border-radius: 999px;
+                 background: #0a0f1c; color: #fde68a; border: 1.5px solid #fde68a;
+                 font-size: .65rem; font-weight: 700; margin-right: .25rem; }
+  .canvas-hint { margin-left: auto; color: #475569; font-style: italic; }
+</style>
+
+<script id="edge-data" type="application/json">
+[
+  {% for e in edges %}
+  {"src": {{ e['src_id'] }}, "dst": {{ e['dst_id'] }},
+   "label": {{ (e['label'] or '')|tojson }},
+   "kind": "{{ e['kind'] or 'comms' }}",
+   "order": {{ e['order_idx'] if e['order_idx'] is not none else 'null' }}}{{ "," if not loop.last }}
+  {% endfor %}
+]
+</script>
+
+<script>
+(function() {
+  const wrap   = document.getElementById("canvas-wrap");
+  const canvas = document.getElementById("arch-canvas");
+  const svg    = document.getElementById("arch-edges");
+  const coords = document.getElementById("canvas-coords");
+  const recenterBtn = document.getElementById("canvas-recenter");
+  const zoomResetBtn = document.getElementById("canvas-zoom-reset");
+  const edges  = JSON.parse(document.getElementById("edge-data").textContent);
+  if (!canvas || !svg) return;
+
+  // --- Pan + zoom state ---------------------------------------------------
+  // World -> screen: screen = (world * zoom) + pan
+  // World <- screen: world  = (screen - pan) / zoom
+  let panX = 0, panY = 0, zoom = 1;
+  const MIN_ZOOM = 0.15, MAX_ZOOM = 3;
+  function applyTransform() {
+    canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+    // Grid backdrop pans (no scale -- keeps dot density constant; that's a
+    // deliberate Miro-style choice).
+    wrap.style.backgroundPosition = `${panX}px ${panY}px`;
+    coords.textContent =
+      `${Math.round(-panX / zoom)}, ${Math.round(-panY / zoom)} - ${Math.round(zoom * 100)}%`;
+  }
+  applyTransform();
+
+  // --- Edge bundling: group all edges by unordered node pair ---------------
+  // Each bundle slot gets a perpendicular offset and a label-position offset
+  // along the curve so multiple edges between the same two cards never sit
+  // on top of each other.  Slot allocation is deterministic (sorted by order
+  // index) so refreshes are stable.
+  function pairKey(a, b) { return a < b ? `${a}|${b}` : `${b}|${a}`; }
+  const bundles = new Map();        // pairKey -> [edge, ...]
+  edges.forEach(e => {
+    const key = pairKey(e.src, e.dst);
+    if (!bundles.has(key)) bundles.set(key, []);
+    bundles.get(key).push(e);
+  });
+  // Sort each bundle by step order so slot[0] = earliest step etc.
+  for (const arr of bundles.values()) {
+    arr.sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999));
+  }
+  // Build a lookup: edge object -> {slot, total}
+  const slots = new Map();
+  for (const arr of bundles.values()) {
+    arr.forEach((e, i) => slots.set(e, { slot: i, total: arr.length }));
+  }
+
+  // --- Edge rendering ------------------------------------------------------
+  function bezierAt(P0, P1, P2, P3, t) {
+    const u = 1 - t;
+    return {
+      x: u*u*u*P0.x + 3*u*u*t*P1.x + 3*u*t*t*P2.x + t*t*t*P3.x,
+      y: u*u*u*P0.y + 3*u*u*t*P1.y + 3*u*t*t*P2.y + t*t*t*P3.y,
+    };
+  }
+
+  function anchors(card) {
+    const x = parseFloat(card.style.left) || 0;
+    const y = parseFloat(card.style.top)  || 0;
+    return { x, y, w: card.offsetWidth, h: card.offsetHeight };
+  }
+
+  function bestSides(a, b) {
+    const sides = box => ({
+      top:    { x: box.x + box.w / 2, y: box.y          },
+      bottom: { x: box.x + box.w / 2, y: box.y + box.h  },
+      left:   { x: box.x,             y: box.y + box.h/2 },
+      right:  { x: box.x + box.w,     y: box.y + box.h/2 },
+    });
+    const A = sides(a), B = sides(b);
+    let best = null, bestD = Infinity;
+    for (const sa of Object.keys(A)) for (const sb of Object.keys(B)) {
+      const dx = A[sa].x - B[sb].x;
+      const dy = A[sa].y - B[sb].y;
+      const d  = dx*dx + dy*dy;
+      if (d < bestD) { bestD = d; best = { a: A[sa], b: B[sb] }; }
+    }
+    return best;
+  }
+
+  function drawEdges() {
+    svg.innerHTML = `
+      <defs>
+        <marker id="arrow-comms" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#64748b"/>
+        </marker>
+        <marker id="arrow-flow" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#a78bfa"/>
+        </marker>
+        <marker id="arrow-reference" viewBox="0 0 10 10" refX="9" refY="5"
+                markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#fbbf24"/>
+        </marker>
+      </defs>`;
+
+    // ----- Pass 1: compute geometry for every edge ---------------------
+    // The canonical-perpendicular trick: bow offsets reference a perpendicular
+    // derived from the *unordered* node pair (low-id center -> high-id center)
+    // instead of the actual chord direction.  That way edges in opposite
+    // directions in the same bundle get distinct physical positions instead
+    // of cancelling each other out.
+    const cardRects = [];
+    canvas.querySelectorAll(".node-card").forEach(c => {
+      const x = parseFloat(c.style.left) || 0;
+      const y = parseFloat(c.style.top)  || 0;
+      // Pad card rects by 4px so labels don't kiss the borders.
+      cardRects.push({ x: x - 4, y: y - 4,
+                       w: c.offsetWidth + 8, h: c.offsetHeight + 8 });
+    });
+
+    const edgeGeoms = [];
+    edges.forEach(e => {
+      const srcEl = canvas.querySelector(`.node-card[data-node-id="${e.src}"]`);
+      const dstEl = canvas.querySelector(`.node-card[data-node-id="${e.dst}"]`);
+      if (!srcEl || !dstEl) return;
+      const { a, b } = bestSides(anchors(srcEl), anchors(dstEl));
+
+      // Canonical perpendicular for the unordered pair {src, dst}
+      const lowId  = Math.min(e.src, e.dst);
+      const highId = Math.max(e.src, e.dst);
+      const lowEl  = canvas.querySelector(`.node-card[data-node-id="${lowId}"]`);
+      const highEl = canvas.querySelector(`.node-card[data-node-id="${highId}"]`);
+      const lowC   = anchors(lowEl);
+      const highC  = anchors(highEl);
+      const cdx = (highC.x + highC.w/2) - (lowC.x + lowC.w/2);
+      const cdy = (highC.y + highC.h/2) - (lowC.y + lowC.h/2);
+      const cdist = Math.hypot(cdx, cdy) || 1;
+      const canonPerpX = -cdy / cdist;
+      const canonPerpY =  cdx / cdist;
+
+      // Slot in the bundle
+      const slotInfo = slots.get(e) || { slot: 0, total: 1 };
+      const N = slotInfo.total;
+      const i = slotInfo.slot;
+      const slotCenter = i - (N - 1) / 2;   // e.g. N=4 -> [-1.5, -0.5, .5, 1.5]
+      const SLOT_PX = 44;                    // perpendicular spacing per slot
+      const offsetX = canonPerpX * slotCenter * SLOT_PX;
+      const offsetY = canonPerpY * slotCenter * SLOT_PX;
+
+      // Bezier shape using actual chord (a -> b) but offset via canonPerp
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const k = Math.min(90, dist * 0.4);
+      const dirX = Math.sign(dx) || 0;
+      const dirY = Math.sign(dy) || 0;
+      const along = (Math.abs(dx) > Math.abs(dy)) ? 1 : 0.2;
+      const cross = (Math.abs(dy) > Math.abs(dx)) ? 1 : 0.2;
+      const P0 = a;
+      const P3 = b;
+      const P1 = { x: a.x + dirX * k * along + offsetX,
+                   y: a.y + dirY * k * cross + offsetY };
+      const P2 = { x: b.x - dirX * k * along + offsetX,
+                   y: b.y - dirY * k * cross + offsetY };
+
+      // Initial label-t: canonical (0.3..0.7 within bundle) with direction flip
+      // so labels for src->dst and dst->src don't land at the same physical spot.
+      const t_canon = N === 1 ? 0.5 : (0.3 + (0.4 * i) / (N - 1));
+      const labelT  = (e.src < e.dst) ? t_canon : (1 - t_canon);
+
+      // Measure label text for collision rect
+      const labelText = e.label || "";
+      const tmp = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      tmp.setAttribute("font-size", "11");
+      tmp.setAttribute("font-weight", "500");
+      tmp.style.visibility = "hidden";
+      tmp.textContent = labelText;
+      svg.appendChild(tmp);
+      const textW = tmp.getComputedTextLength();
+      svg.removeChild(tmp);
+      const padX = 7;
+      const numW = e.order !== null ? 18 : 0;
+      const gap  = e.order !== null && labelText ? 6 : 0;
+      const pillW = numW + gap + textW + padX * 2;
+      const pillH = 18;
+
+      edgeGeoms.push({
+        e, P0, P1, P2, P3,
+        labelT,
+        textW, padX, numW, gap, pillW, pillH,
+        hasLabel: !!(labelText || e.order !== null),
+      });
+    });
+
+    // ----- Pass 2: greedy label collision avoidance ---------------------
+    // For each label, slide it along its curve (vary t in 0.15..0.85) until
+    // its pill rect doesn't overlap any card rect or any earlier label rect.
+    // Earlier labels are fixed; later ones bend around them.
+    function pillRect(g, t) {
+      const pt = bezierAt(g.P0, g.P1, g.P2, g.P3, t);
+      return { x: pt.x - g.pillW / 2, y: pt.y - g.pillH / 2,
+               w: g.pillW, h: g.pillH };
+    }
+    function overlap(a, b) {
+      return !(a.x + a.w < b.x || b.x + b.w < a.x ||
+               a.y + a.h < b.y || b.y + b.h < a.y);
+    }
+    function clear(rect, againstRects) {
+      for (const r of againstRects) if (overlap(rect, r)) return false;
+      return true;
+    }
+    const placedLabelRects = [];
+    edgeGeoms.forEach(g => {
+      if (!g.hasLabel) return;
+      // Try the canonical t first, then expand outward in small steps.
+      const t0 = g.labelT;
+      const tries = [0];
+      for (let step = 1; step <= 12; step++) {
+        tries.push( step * 0.04);   // walk toward 1.0
+        tries.push(-step * 0.04);   // walk toward 0.0
+      }
+      for (const dt of tries) {
+        const t = Math.max(0.12, Math.min(0.88, t0 + dt));
+        const r = pillRect(g, t);
+        if (clear(r, cardRects) && clear(r, placedLabelRects)) {
+          g.finalT = t;
+          g.finalRect = r;
+          placedLabelRects.push(r);
+          return;
+        }
+      }
+      // No clear slot found -- fall back to canonical t and accept the overlap.
+      g.finalT = t0;
+      g.finalRect = pillRect(g, t0);
+      placedLabelRects.push(g.finalRect);
+    });
+
+    // ----- Pass 3: draw paths, then labels ------------------------------
+    edgeGeoms.forEach(g => {
+      const e = g.e;
+      const d = `M ${g.P0.x} ${g.P0.y} C ${g.P1.x} ${g.P1.y}, ${g.P2.x} ${g.P2.y}, ${g.P3.x} ${g.P3.y}`;
+      const stroke = e.kind === "flow"      ? "#a78bfa"
+                   : e.kind === "reference" ? "#fbbf24"
+                   : "#64748b";
+      const dash   = e.kind === "reference" ? "4 3" : "none";
+      const marker = e.kind === "flow" ? "url(#arrow-flow)"
+                   : e.kind === "reference" ? "url(#arrow-reference)"
+                   : "url(#arrow-comms)";
+      svg.insertAdjacentHTML("beforeend",
+        `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="1.8"
+               stroke-dasharray="${dash}" marker-end="${marker}" opacity="0.85"/>`);
+    });
+
+    edgeGeoms.forEach(g => {
+      if (!g.hasLabel) return;
+      const e = g.e;
+      const r = g.finalRect;
+      svg.insertAdjacentHTML("beforeend",
+        `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}"
+               rx="9" ry="9" fill="#0a0f1c"
+               stroke="${e.kind === 'flow' ? '#a78bfa' : e.kind === 'reference' ? '#fbbf24' : '#64748b'}"
+               stroke-width="1" opacity="0.95"/>`);
+      if (e.order !== null) {
+        const bx = r.x + g.padX + 9;
+        const by = r.y + r.h / 2;
+        svg.insertAdjacentHTML("beforeend",
+          `<circle cx="${bx}" cy="${by}" r="8"
+                   fill="#fde68a" stroke="#0a0f1c" stroke-width="1"/>
+           <text x="${bx}" y="${by + 3.5}" text-anchor="middle"
+                 font-size="10" font-weight="700" fill="#0a0f1c">${e.order}</text>`);
+      }
+      if (e.label) {
+        const tx = r.x + g.padX + g.numW + g.gap + g.textW / 2;
+        const ty = r.y + r.h / 2 + 3.5;
+        svg.insertAdjacentHTML("beforeend",
+          `<text x="${tx}" y="${ty}" text-anchor="middle"
+                 font-size="11" font-weight="500" fill="#e5e7eb">${e.label}</text>`);
+      }
+    });
+  }
+
+  // --- Drag / pan / zoom handlers -----------------------------------------
+  let drag = null, pan = null;
+  const CLICK_THRESHOLD = 5;
+
+  // Convert screen-space delta to world-space delta (just divide by zoom).
+  function s2wDelta(sx, sy) { return { x: sx / zoom, y: sy / zoom }; }
+
+  canvas.addEventListener("mousedown", e => {
+    if (e.button !== 0) return;
+    const card = e.target.closest(".node-card");
+    if (!card) return;
+    e.preventDefault();
+    e.stopPropagation();
+    drag = {
+      card,
+      startX:  e.clientX, startY:  e.clientY,
+      originX: parseFloat(card.style.left) || 0,
+      originY: parseFloat(card.style.top)  || 0,
+      moved:   false,
+    };
+  });
+
+  wrap.addEventListener("mousedown", e => {
+    if (e.button !== 0) return;
+    if (e.target.closest(".node-card")) return;
+    if (e.target.closest(".canvas-tools")) return;
+    e.preventDefault();
+    pan = { startX: e.clientX, startY: e.clientY, panX, panY };
+    wrap.classList.add("panning");
+  });
+
+  window.addEventListener("mousemove", e => {
+    if (drag) {
+      const dx = e.clientX - drag.startX;
+      const dy = e.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(dx, dy) > CLICK_THRESHOLD) {
+        drag.moved = true;
+        drag.card.classList.add("dragging");
+      }
+      if (drag.moved) {
+        // Card moves in WORLD space, but mouse delta is in SCREEN space --
+        // divide by zoom so the card sticks under the cursor at any zoom level.
+        const w = s2wDelta(dx, dy);
+        drag.card.style.left = (drag.originX + w.x) + "px";
+        drag.card.style.top  = (drag.originY + w.y) + "px";
+        drawEdges();
+      }
+    } else if (pan) {
+      panX = pan.panX + (e.clientX - pan.startX);
+      panY = pan.panY + (e.clientY - pan.startY);
+      applyTransform();
+    }
+  });
+
+  window.addEventListener("mouseup", e => {
+    if (drag) {
+      const { card, moved } = drag;
+      if (moved) {
+        card.classList.remove("dragging");
+        const fd = new FormData();
+        fd.append("x", parseFloat(card.style.left));
+        fd.append("y", parseFloat(card.style.top));
+        fetch(`/node/${card.dataset.nodeId}/position`, { method: "POST", body: fd })
+          .catch(err => console.warn("position save failed:", err));
+      } else {
+        htmx.trigger(card, "card-click");
+      }
+      drag = null;
+    }
+    if (pan) {
+      wrap.classList.remove("panning");
+      pan = null;
+    }
+  });
+
+  // Wheel: Ctrl = zoom around cursor, otherwise pan
+  wrap.addEventListener("wheel", e => {
+    e.preventDefault();
+    if (e.ctrlKey) {
+      // Zoom around the cursor position.  Find the world point under the
+      // cursor before zoom, change zoom, then adjust pan so the same world
+      // point lands under the same screen point.
+      const rect = wrap.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const worldX = (sx - panX) / zoom;
+      const worldY = (sy - panY) / zoom;
+
+      const factor = Math.exp(-e.deltaY * 0.0015);  // smooth exponential
+      zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * factor));
+
+      panX = sx - worldX * zoom;
+      panY = sy - worldY * zoom;
+      applyTransform();
+    } else {
+      if (e.shiftKey) { panX -= e.deltaY; }
+      else            { panY -= e.deltaY; panX -= e.deltaX; }
+      applyTransform();
+    }
+  }, { passive: false });
+
+  // Recenter: zoom = 1, pan so content bbox center is in viewport center.
+  recenterBtn.addEventListener("click", () => {
+    const cards = canvas.querySelectorAll(".node-card");
+    if (!cards.length) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    cards.forEach(c => {
+      const x = parseFloat(c.style.left) || 0;
+      const y = parseFloat(c.style.top)  || 0;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x + c.offsetWidth);
+      maxY = Math.max(maxY, y + c.offsetHeight);
+    });
+    // Auto-fit zoom: shrink if content is wider/taller than the viewport.
+    const contentW = maxX - minX;
+    const contentH = maxY - minY;
+    const fitZoomX = (wrap.clientWidth  - 80) / contentW;
+    const fitZoomY = (wrap.clientHeight - 80) / contentH;
+    zoom = Math.max(MIN_ZOOM, Math.min(1, Math.min(fitZoomX, fitZoomY)));
+
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    panX = wrap.clientWidth  / 2 - cx * zoom;
+    panY = wrap.clientHeight / 2 - cy * zoom;
+    applyTransform();
+    drawEdges();
+  });
+
+  zoomResetBtn.addEventListener("click", () => {
+    // Reset zoom around the viewport center so the user doesn't get teleported.
+    const sx = wrap.clientWidth  / 2;
+    const sy = wrap.clientHeight / 2;
+    const worldX = (sx - panX) / zoom;
+    const worldY = (sy - panY) / zoom;
+    zoom = 1;
+    panX = sx - worldX;
+    panY = sy - worldY;
+    applyTransform();
+  });
+
+  window.addEventListener("resize", drawEdges);
+
+  requestAnimationFrame(() => {
+    drawEdges();
+    recenterBtn.click();
+  });
+})();
+</script>
